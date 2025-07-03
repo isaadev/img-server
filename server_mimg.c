@@ -18,14 +18,10 @@
 *     workers     - The number of parallel threads to process requests.
 *     policy      - The queue policy to use for request dispatching.
 *
-* Author:
-*     Renato Mancuso
 *
 * Affiliation:
 *     Boston University
 *
-* Creation Date:
-*     October 31, 2023
 *
 * Notes:
 *     Ensure to have proper permissions and available port before running the
