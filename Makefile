@@ -65,4 +65,4 @@ $(BUILDDIR)/%.o: %.c
 	$(CC) $(CFLAGS) -o $@ -c $<
 
 clean:
-	rm *~ -rf $(BUILDDIR)
+	rm -rf *~ $(BUILDDIR)
