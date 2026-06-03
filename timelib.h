@@ -33,7 +33,8 @@
 /* How many nanoseconds in a second */
 #define NANO_IN_SEC (1000*1000*1000)
 
-/* Macro wrapper for RDTSC instruction */
+/* Macro wrapper for RDTSC on x86, with a portable monotonic-clock fallback. */
+#if defined(__i386__) || defined(__x86_64__)
 #define get_clocks(clocks)						\
 	do {								\
 		uint32_t __clocks_hi, __clocks_lo;			\
@@ -44,6 +45,15 @@
 		clocks = (((uint64_t)__clocks_hi) << 32) |		\
 			((uint64_t)__clocks_lo);			\
 	} while (0)
+#else
+#define get_clocks(clocks)						\
+	do {								\
+		struct timespec __now;					\
+		clock_gettime(CLOCK_MONOTONIC, &__now);			\
+		clocks = ((uint64_t)__now.tv_sec * NANO_IN_SEC) +	\
+			(uint64_t)__now.tv_nsec;			\
+	} while (0)
+#endif
 
 /* Return the number of clock cycles elapsed when waiting for
  * wait_time seconds using sleeping functions */

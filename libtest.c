@@ -16,65 +16,66 @@
  * included by both client and server */
 #include "common.h"
 
-/* Simple main function to test key functions in the imglib and
- * md5lib */
+/* Simple smoke test for key functions in imglib and md5lib. */
 int main (int argc, char ** argv) {
+	const char * input_path = argc > 1 ? argv[1] : "images/test1.bmp";
+	uint8_t img_err;
 
-	char * buffer = malloc(818058);
-	size_t toread = 818058;
-	size_t got = 0;
-	int ff = open("sample.bmp", O_RDONLY);
-	while(got < toread) {
-	    got += read(ff, buffer + got, toread - got);
-	}
-	struct md5digest md5dig = buf_md5sum(buffer, got);
+	struct md5digest md5dig = file_md5sum(input_path);
 	print_digest(md5dig);
-	close(ff);
 
-	struct image * img_test = loadBMP("sample.bmp");
+	struct image * img_test = loadBMP(input_path);
 	if (!img_test) {
 	    perror("Unable to load image.");
+	    return EXIT_FAILURE;
 	}
 
-	int err = saveBMP("sample_out.bmp", img_test);
+	int err = saveBMP("build/sample_out.bmp", img_test);
 	if (err) {
 	    perror("Unable to save image.");
 	}
 
 	struct image * img_rot = rotate90Clockwise(img_test, NULL);
 
-	err = saveBMP("sample_rot.bmp", img_rot);
+	err = saveBMP("build/sample_rot.bmp", img_rot);
 	if (err) {
 	    perror("Unable to save image.");
 	}
 
-	struct image * img_sharp = sharpenImage(img_test);
+	struct image * img_sharp = sharpenImage(img_test, &img_err);
 
-	err = saveBMP("sample_sharp.bmp", img_sharp);
+	err = saveBMP("build/sample_sharp.bmp", img_sharp);
 	if (err) {
 	    perror("Unable to save image.");
 	}
 
-	struct image * img_blur = blurImage(img_test);
+	struct image * img_blur = blurImage(img_test, &img_err);
 
-	err = saveBMP("sample_blur.bmp", img_blur);
+	err = saveBMP("build/sample_blur.bmp", img_blur);
 	if (err) {
 	    perror("Unable to save image.");
 	}
 
-	struct image * img_vert = detectVerticalEdges(img_test);
+	struct image * img_vert = detectVerticalEdges(img_test, &img_err);
 
-	err = saveBMP("sample_vert.bmp", img_vert);
+	err = saveBMP("build/sample_vert.bmp", img_vert);
 	if (err) {
 	    perror("Unable to save image.");
 	}
 
-	struct image * img_horiz = detectHorizontalEdges(img_test);
+	struct image * img_horiz = detectHorizontalEdges(img_test, &img_err);
 
-	err = saveBMP("sample_horiz.bmp", img_horiz);
+	err = saveBMP("build/sample_horiz.bmp", img_horiz);
 	if (err) {
 	    perror("Unable to save image.");
 	}
+
+	deleteImage(img_test);
+	deleteImage(img_rot);
+	deleteImage(img_sharp);
+	deleteImage(img_blur);
+	deleteImage(img_vert);
+	deleteImage(img_horiz);
 
 	return EXIT_SUCCESS;
 }

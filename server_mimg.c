@@ -39,6 +39,8 @@
 #include <signal.h>
 #include <assert.h>
 #include <pthread.h>
+#include <inttypes.h>
+#include <fcntl.h>
 
 /* Needed for wait(...) */
 #include <sys/types.h>
@@ -62,7 +64,7 @@
 /* 4KB of stack for the worker thread */
 #define STACK_SIZE (4096)
 
-/* Mutex needed to protect the threaded printf. DO NOT TOUCH */
+/* Mutex needed to protect threaded printf calls. */
 sem_t * printf_mutex;
 
 /* Synchronized printf for multi-threaded operation */
@@ -73,10 +75,54 @@ sem_t * printf_mutex;
 		sem_post(printf_mutex);		\
 	} while (0)
 
-/* START - Variables needed to protect the shared queue. DO NOT TOUCH */
 sem_t * queue_mutex;
 sem_t * queue_notify;
-/* END - Variables needed to protect the shared queue. DO NOT TOUCH */
+
+#define SEM_NAME_SIZE 64
+static char printf_sem_name[SEM_NAME_SIZE];
+static char queue_mutex_sem_name[SEM_NAME_SIZE];
+static char queue_notify_sem_name[SEM_NAME_SIZE];
+
+static sem_t * create_semaphore(const char * label, char * name, unsigned int value)
+{
+#ifdef __APPLE__
+	snprintf(name, SEM_NAME_SIZE, "/imgsrv_%s_%ld", label, (long)getpid());
+	sem_unlink(name);
+	return sem_open(name, O_CREAT | O_EXCL, 0600, value);
+#else
+	sem_t * semaphore;
+	(void)label;
+	(void)name;
+
+	semaphore = (sem_t *)malloc(sizeof(sem_t));
+	if (!semaphore) {
+		return NULL;
+	}
+
+	if (sem_init(semaphore, 0, value) < 0) {
+		free(semaphore);
+		return NULL;
+	}
+
+	return semaphore;
+#endif
+}
+
+static void destroy_semaphore(sem_t * semaphore, char * name)
+{
+	if (!semaphore) {
+		return;
+	}
+
+#ifdef __APPLE__
+	sem_close(semaphore);
+	sem_unlink(name);
+#else
+	(void)name;
+	sem_destroy(semaphore);
+	free(semaphore);
+#endif
+}
 
 /* Global array of registered images and its length -- reallocated as we go! */
 struct image ** images = NULL;
@@ -137,12 +183,7 @@ void queue_init(struct queue * the_queue, size_t queue_size, enum queue_policy p
 int add_to_queue(struct request_meta to_add, struct queue * the_queue)
 {
 	int retval = 0;
-	/* QUEUE PROTECTION INTRO START --- DO NOT TOUCH */
 	sem_wait(queue_mutex);
-	/* QUEUE PROTECTION INTRO END --- DO NOT TOUCH */
-
-	/* WRITE YOUR CODE HERE! */
-	/* MAKE SURE NOT TO RETURN WITHOUT GOING THROUGH THE OUTRO CODE! */
 
 	/* Make sure that the queue is not full */
 	if (the_queue->available == 0) {
@@ -152,13 +193,10 @@ int add_to_queue(struct request_meta to_add, struct queue * the_queue)
 		the_queue->requests[the_queue->wr_pos] = to_add;
 		the_queue->wr_pos = (the_queue->wr_pos + 1) % the_queue->max_size;
 		the_queue->available--;
-		/* QUEUE SIGNALING FOR CONSUMER --- DO NOT TOUCH */
 		sem_post(queue_notify);
 	}
 
-	/* QUEUE PROTECTION OUTRO START --- DO NOT TOUCH */
 	sem_post(queue_mutex);
-	/* QUEUE PROTECTION OUTRO END --- DO NOT TOUCH */
 	return retval;
 }
 
@@ -166,47 +204,35 @@ int add_to_queue(struct request_meta to_add, struct queue * the_queue)
 struct request_meta get_from_queue(struct queue * the_queue)
 {
 	struct request_meta retval;
-	/* QUEUE PROTECTION INTRO START --- DO NOT TOUCH */
 	sem_wait(queue_notify);
 	sem_wait(queue_mutex);
-	/* QUEUE PROTECTION INTRO END --- DO NOT TOUCH */
 
-	/* WRITE YOUR CODE HERE! */
-	/* MAKE SURE NOT TO RETURN WITHOUT GOING THROUGH THE OUTRO CODE! */
 	retval = the_queue->requests[the_queue->rd_pos];
 	the_queue->rd_pos = (the_queue->rd_pos + 1) % the_queue->max_size;
 	the_queue->available++;
 
-	/* QUEUE PROTECTION OUTRO START --- DO NOT TOUCH */
 	sem_post(queue_mutex);
-	/* QUEUE PROTECTION OUTRO END --- DO NOT TOUCH */
 	return retval;
 }
 
 void dump_queue_status(struct queue * the_queue)
 {
 	size_t i, j;
-	/* QUEUE PROTECTION INTRO START --- DO NOT TOUCH */
 	sem_wait(queue_mutex);
-	/* QUEUE PROTECTION INTRO END --- DO NOT TOUCH */
 
-	/* WRITE YOUR CODE HERE! */
-	/* MAKE SURE NOT TO RETURN WITHOUT GOING THROUGH THE OUTRO CODE! */
 	sem_wait(printf_mutex);
 	printf("Q:[");
 
 	for (i = the_queue->rd_pos, j = 0; j < the_queue->max_size - the_queue->available;
 	     i = (i + 1) % the_queue->max_size, ++j)
 	{
-		printf("R%ld%s", the_queue->requests[i].request.req_id,
+		printf("R%" PRIu64 "%s", the_queue->requests[i].request.req_id,
 		       ((j+1 != the_queue->max_size - the_queue->available)?",":""));
 	}
 
 	printf("]\n");
 	sem_post(printf_mutex);
-	/* QUEUE PROTECTION OUTRO START --- DO NOT TOUCH */
 	sem_post(queue_mutex);
-	/* QUEUE PROTECTION OUTRO END --- DO NOT TOUCH */
 }
 
 void register_new_image(int conn_socket, struct request * req)
@@ -318,7 +344,7 @@ void * worker_main (void * arg)
 			}
 		}
 
-		printf("T%d R%ld:%lf,%s,%d,%ld,%ld,%lf,%lf,%lf\n",
+		printf("T%d R%" PRIu64 ":%lf,%s,%d,%" PRIu64 ",%" PRIu64 ",%lf,%lf,%lf\n",
 		       params->worker_id, req.request.req_id,
 		       TSPEC_TO_DOUBLE(req.request.req_timestamp),
 		       OPCODE_TO_STRING(req.request.img_op),
@@ -397,8 +423,7 @@ int control_workers(enum worker_command cmd, size_t worker_count,
 				perror("Unable to start thread.");
 				return EXIT_FAILURE;
 			} else {
-				printf("INFO: Worker thread %ld (TID = %d) started!\n",
-				       i, worker_ids[i]);
+				printf("INFO: Worker thread %zu started!\n", i);
 			}
 		}
 	}
@@ -528,7 +553,7 @@ void handle_connection(int conn_socket, struct connection_params conn_params)
 
 				clock_gettime(CLOCK_MONOTONIC, &req->completion_timestamp);
 
-				sync_printf("T%ld R%ld:%lf,%s,%d,%ld,%ld,%lf,%lf,%lf\n",
+				sync_printf("T%zu R%" PRIu64 ":%lf,%s,%d,%" PRIu64 ",%" PRIu64 ",%lf,%lf,%lf\n",
 				       conn_params.workers, req->request.req_id,
 				       TSPEC_TO_DOUBLE(req->request.req_timestamp),
 				       OPCODE_TO_STRING(req->request.img_op),
@@ -552,7 +577,7 @@ void handle_connection(int conn_socket, struct connection_params conn_params)
 				resp.ack = RESP_REJECTED;
 				send(conn_socket, &resp, sizeof(struct response), 0);
 
-				sync_printf("X%ld:%lf,%lf,%lf\n", req->request.req_id,
+				sync_printf("X%" PRIu64 ":%lf,%lf,%lf\n", req->request.req_id,
 				       TSPEC_TO_DOUBLE(req->request.req_timestamp),
 				       TSPEC_TO_DOUBLE(req->request.req_length),
 				       TSPEC_TO_DOUBLE(req->receipt_timestamp)
@@ -591,12 +616,11 @@ int main (int argc, char ** argv) {
 		switch (opt) {
 		case 'q':
 			conn_params.queue_size = strtol(optarg, NULL, 10);
-			printf("INFO: setting queue size = %ld\n", conn_params.queue_size);
+			printf("INFO: setting queue size = %zu\n", conn_params.queue_size);
 			break;
 		case 'w':
 			conn_params.workers = strtol(optarg, NULL, 10);
-			printf("INFO: setting worker count = %ld\n", conn_params.workers);
-			/* TODO: SUPPORT MULTIPLE THREADS */
+			printf("INFO: setting worker count = %zu\n", conn_params.workers);
 			if (conn_params.workers != 1) {
 				ERROR_INFO();
 				fprintf(stderr, "Only 1 worker is supported in this implementation!\n" USAGE_STRING, argv[0]);
@@ -683,37 +707,34 @@ int main (int argc, char ** argv) {
 		return EXIT_FAILURE;
 	}
 
-	/* Initilize threaded printf mutex */
-	printf_mutex = (sem_t *)malloc(sizeof(sem_t));
-	retval = sem_init(printf_mutex, 0, 1);
-	if (retval < 0) {
+	/* Initialize threaded printf mutex. */
+	printf_mutex = create_semaphore("printf", printf_sem_name, 1);
+	if (!printf_mutex || printf_mutex == SEM_FAILED) {
 		ERROR_INFO();
 		perror("Unable to initialize printf mutex");
 		return EXIT_FAILURE;
 	}
 
-	/* Initialize queue protection variables. DO NOT TOUCH. */
-	queue_mutex = (sem_t *)malloc(sizeof(sem_t));
-	queue_notify = (sem_t *)malloc(sizeof(sem_t));
-	retval = sem_init(queue_mutex, 0, 1);
-	if (retval < 0) {
+	/* Initialize queue protection variables. */
+	queue_mutex = create_semaphore("queue_mutex", queue_mutex_sem_name, 1);
+	if (!queue_mutex || queue_mutex == SEM_FAILED) {
 		ERROR_INFO();
 		perror("Unable to initialize queue mutex");
 		return EXIT_FAILURE;
 	}
-	retval = sem_init(queue_notify, 0, 0);
-	if (retval < 0) {
+	queue_notify = create_semaphore("queue_notify", queue_notify_sem_name, 0);
+	if (!queue_notify || queue_notify == SEM_FAILED) {
 		ERROR_INFO();
 		perror("Unable to initialize queue notify");
 		return EXIT_FAILURE;
 	}
-	/* DONE - Initialize queue protection variables */
 
 	/* Ready to handle the new connection with the client. */
 	handle_connection(accepted, conn_params);
 
-	free(queue_mutex);
-	free(queue_notify);
+	destroy_semaphore(queue_mutex, queue_mutex_sem_name);
+	destroy_semaphore(queue_notify, queue_notify_sem_name);
+	destroy_semaphore(printf_mutex, printf_sem_name);
 
 	close(sockfd);
 	return EXIT_SUCCESS;

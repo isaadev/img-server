@@ -1,0 +1,12 @@
+build/
+*.o
+*.dSYM/
+*~
+
+# Generated BMP outputs from local smoke tests.
+*_out.bmp
+*_rot.bmp
+*_sharp.bmp
+*_blur.bmp
+*_vert.bmp
+*_horiz.bmp

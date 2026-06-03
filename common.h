@@ -59,7 +59,7 @@ enum img_opcode {
 };
 
 /* String version of the opcodes */
-const char * __opcode_strings [] = {
+static const char * const __opcode_strings [] = {
     "IMG_UNUSED",
     "IMG_REGISTER",
     "IMG_ROT90CLKW",

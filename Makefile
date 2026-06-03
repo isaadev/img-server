@@ -34,24 +34,35 @@
 ###############################################################################
 
 
+CC ?= gcc
+CFLAGS ?= -O2 -W -Wall
+LDFLAGS ?=
+LDLIBS = -lm -lpthread
+
 TARGETS = server_mimg
 LIBS = timelib imglib md5sum
-LDFLAGS = -lm -lpthread -O0
 BUILDDIR = build
 BUILD_TARGETS = $(addprefix $(BUILDDIR)/,$(TARGETS))
 OBJS = $(addprefix $(BUILDDIR)/,$(addsuffix .o,$(TARGETS) $(LIBS)))
 LIBOBJS = $(addprefix $(BUILDDIR)/,$(addsuffix .o,$(LIBS)))
+SMOKE_TEST = $(BUILDDIR)/libtest
 
 all: $(BUILD_TARGETS)
 
 $(BUILD_TARGETS): $(BUILDDIR) $(OBJS)
-	gcc -o $@ $@.o $(LIBOBJS) $(LDFLAGS) -W -Wall
+	$(CC) $(LDFLAGS) -o $@ $@.o $(LIBOBJS) $(LDLIBS)
+
+$(SMOKE_TEST): $(BUILDDIR) $(BUILDDIR)/libtest.o $(LIBOBJS)
+	$(CC) $(LDFLAGS) -o $@ $(BUILDDIR)/libtest.o $(LIBOBJS) $(LDLIBS)
+
+smoke-test: $(SMOKE_TEST)
+	./$(SMOKE_TEST) images/test1.bmp
 
 $(BUILDDIR):
-	mkdir $(BUILDDIR)
+	mkdir -p $(BUILDDIR)
 
 $(BUILDDIR)/%.o: %.c
-	gcc -o $@ -c $< -W -Wall
+	$(CC) $(CFLAGS) -o $@ -c $<
 
 clean:
 	rm *~ -rf $(BUILDDIR)
